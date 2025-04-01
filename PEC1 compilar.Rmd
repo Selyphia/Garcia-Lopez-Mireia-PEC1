@@ -1,0 +1,200 @@
+---
+title: "PEC1 AO"
+author: "Mireia García López"
+date: "2025-03-27"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## PEC1
+
+```{r cars}
+# Instalar todos los paquetes necesarios
+ options(repos = c(CRAN = "https://cran.rediris.es/")) # Definir el CRAN
+ install.packages("readxl", lib = "C:/Users/mireg/AppData/Local/R/win-library/4.4")
+
+```
+
+```{r}
+# Instalar los paquetes necesarios
+install.packages("BiocManager")
+BiocManager::install("goProfiles",
+                     dep=TRUE)
+BiocManager::install("SummarizedExperiment")
+
+install.packages("jsonlite", dependencies = TRUE)
+
+install.packages("git2r")
+```
+
+1.  **Seleccionad y descargad un dataset de metabolómica, que podéis obtener de metabolomicsWorkbench o de este repositorio de GitHub.**
+
+```{r}
+# Cargar la librerías
+library(jsonlite)
+library(SummarizedExperiment)
+library(git2r)
+```
+
+```{r}
+# Leer el archivo JSON
+json_data <- fromJSON("C:\\Users\\mireg\\Desktop\\Master Bioinformatica y Bioestadistica\\Análisis de datos ómicos\\PAC1\\ST003791_AN006232.json")
+
+# Estudiar el json_data
+str(json_data)
+names(json_data)
+```
+
+**2 . Cread un objeto de clase SummarizedExperiment que contenga los datos y los metadatos (información acerca del dataset, sus filas y columnas). La clase SummarizedExperiment es una extensión de ExpressionSet, utilizada por muchas aplicaciones y bases de datos (como es el caso de metabolomicsWorkbench). ¿Cuáles son sus principales diferencias con la clase ExpressionSet?**
+
+```{r}
+# Extraer la matriz de expresión (assay)
+expr_data <- json_data$NMR_METABOLITE_DATA$Data
+rownames(expr_data) <- expr_data$Metabolite
+expr_data <- expr_data[, -1]  # Eliminar la columna de nombres de metabolitos
+
+# Convertir a matriz numérica
+expr_matrix <- as.matrix(expr_data)
+
+# Extraer metadatos de muestras (colData)
+sample_metadata <- json_data$SUBJECT_SAMPLE_FACTORS$`Additional sample data`
+sample_factors <- json_data$SUBJECT_SAMPLE_FACTORS$Factors
+
+# Unir ambos metadatos de muestras
+total_sample_metadata <- cbind(sample_metadata, sample_factors)
+rownames(total_sample_metadata) <- total_sample_metadata$SampleID  # Asegurar IDs
+
+# Extraer metadatos de características (rowData)
+row_data <- data.frame(Metabolite = rownames(expr_matrix))
+rownames(row_data) <- row_data$Metabolite
+
+# Extraer metadatos generales del estudio (metadata)
+study_metadata <- list(
+  STUDY = json_data$STUDY,
+  PROJECT = json_data$PROJECT,
+  PUBLICATIONS = json_data$PUBLICATIONS
+)
+
+# Revisar dimensiones ya que hay un error
+dim(expr_matrix)
+dim(row_data)
+dim(total_sample_metadata)
+# Comprobamos que las dimensiones de total_sample_data no coinciden con las de expr_matrix
+
+# Filtrar total_sample_metadata para que coincida con las muestras de expr_matrix
+total_sample_metadata <- total_sample_metadata[rownames(total_sample_metadata) %in% colnames(expr_matrix), ] #Genera un vector lógico que indica qué filas de total_sample_metadata tienen un nombre de muestra que está presente en expr_matrix y selecciona los datos con true.
+
+# Verificar nueva dimensión
+dim(total_sample_metadata)
+
+# Ordenar total_sample_metadata para que coincida con colnames(expr_matrix)
+total_sample_metadata <- total_sample_metadata[colnames(expr_matrix), ]
+
+# Construir el objeto SummarizedExperiment
+se <- SummarizedExperiment(
+  assays = list(counts = expr_matrix),
+  colData = total_sample_metadata,
+  rowData = row_data,
+  metadata = study_metadata
+)
+se
+```
+
+**3. Llevad a cabo un análisis exploratorio que os proporcione una visión general del dataset en la línea de lo que hemos visto en las actividades de este reto.**
+
+Análisis de la estructura:
+
+```{r}
+# Verificar la estructura general del objeto SummarizedExperiment
+show(se)
+
+# Verificar las dimensiones de la matriz de expresión (assays), los metadatos de las muestras (colData) y las características de las filas (rowData)
+dim(assays(se)$counts)  # Dimensiones de la matriz de expresión
+dim(colData(se))        # Dimensiones de los metadatos de las muestras
+dim(rowData(se))        # Dimensiones de los metadatos de las características
+
+# Verificar las primeras filas de los metadatos de las muestras y características
+head(colData(se))       # Primeras filas de los metadatos de las muestras
+head(rowData(se))       # Primeras filas de los metadatos de las características
+
+```
+
+Análisis de la matrix de expresión:
+
+```{r}
+# Verificar si la matriz es numérica antes de la conversión
+is.numeric(assays(se)$counts)  # Debería devolver FALSE si no es numérica
+class(assays(se)$counts)
+
+# Guardar los nombres de filas y columnas
+row_names <- rownames(assays(se)$counts)
+col_names <- colnames(assays(se)$counts)
+
+# Convertir la matriz a numérico, sin modificar los nombres
+assays(se, withDimnames = FALSE)$counts <- apply(assays(se)$counts, 2, function(x) as.numeric(as.character(x)))
+
+# Restaurar los nombres de filas y columnas para que coincidan con los originales
+rownames(assays(se)$counts) <- row_names
+colnames(assays(se)$counts) <- col_names
+
+# Verificar la conversión
+is.numeric(assays(se)$counts)
+
+# Estadísticas descriptivas de la matriz de expresión
+summary(assays(se)$counts)  # Resumen de estadísticas
+apply(assays(se)$counts, 1, sd) # Desviación estándar por metabolito
+average_per_analyte <- apply(assays(se)$counts, 1, mean) # Media por analito (por fila)
+average_per_analyte  # Esto muestra la media de cada metabolito a través de las muestras
+```
+
+Análisis de los metadatos en muestras:
+
+```{r}
+# Verificar los nombres de las muestras
+colnames(assays(se)$counts)
+
+# Inspeccionar los metadatos de las muestras
+head(colData(se))
+
+# Verificar la distribución de algunas variables en los metadatos de las muestras
+table(colData(se)$Age)  # Distribución de la edad
+table(colData(se)$Sex)  # Distribución por sexo
+
+```
+
+Análisis de los metadatos de los metabolitos:
+
+```{r}
+# Verificar los primeros metabolitos y sus metadatos
+head(rowData(se))
+
+# Verificar la distribución de los nombres de los metabolitos
+table(rowData(se)$Metabolite)
+
+```
+
+Observar los datos:
+
+```{r}
+# Instalar y cargar la librería pheatmap si no está instalada
+if (!require(pheatmap)) install.packages("pheatmap")
+library(pheatmap)
+
+# Crear un mapa de calor de la matriz de expresión
+pheatmap(assays(se)$counts, cluster_rows = TRUE, cluster_cols = TRUE, 
+         main = "Mapa de Calor de la Expresión de Metabolitos")
+
+```
+
+```{r}
+# Guardar el objeto de clase SummarizedExperiment
+save(se, file = "metabolite_data.Rda")
+write.csv(assays(se)$counts, "expression_data.csv", row.names = TRUE)
+write.csv(colData(se), "samples_metadata.csv", row.names = TRUE)
+write.csv(rowData(se), "metabolites_metadata.csv", row.names = TRUE)
+```
